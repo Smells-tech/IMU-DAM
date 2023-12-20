@@ -4,9 +4,9 @@ import os
 from multiprocessing import Process
 
 app = Flask(__name__)
-app.config["RESULT_VIDEOS"] = "/home/luuk/development/first-order-model/results"
+app.config["RESULT_VIDEOS"] = "/home/luuk/development/DAM/results"
 
-os.makedirs(os.path.join(app.instance_path, 'upload'), exist_ok=True)
+os.makedirs(os.path.join(app.root_path, 'upload'), exist_ok=True)
 opt=DefaultOptions()
 generator, kp_detector = load_checkpoints(
         config_path=opt.config,
@@ -24,7 +24,7 @@ def upload():
     if request.method == "POST":
         if  request.files:
             file = request.files["image"]
-            file.save(os.path.join(app.instance_path, 'upload', "source.png"))
+            file.save(os.path.join(app.root_path, 'upload', "source.png"))
             return "OK", 200
     else:
         return "NOT OK", 500

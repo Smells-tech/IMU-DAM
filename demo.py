@@ -114,6 +114,67 @@ def find_best_frame(source, driving, cpu=False):
             frame_num = i
     return frame_num
 
+
+class DefaultOptions():
+    def __init__(self):
+        self.config = '/home/luuk/development/DAM/config/voxceleb1-hdam.yaml'
+        self.checkpoint = '/home/luuk/development/DAM/checkpoints/voxceleb-hdam.pth.tar'
+        self.source_image = '/home/luuk/development/DAM/upload/source.png'
+        self.driving_videos = [
+            '/home/luuk/development/DAM/data/food1.mp4',
+            '/home/luuk/development/DAM/data/food2a.mp4',
+            '/home/luuk/development/DAM/data/food2b.mp4',
+            '/home/luuk/development/DAM/data/food3.mp4',
+            '/home/luuk/development/DAM/data/food4a.mp4',
+            '/home/luuk/development/DAM/data/food4b.mp4',
+            '/home/luuk/development/DAM/data/food4c.mp4',
+            '/home/luuk/development/DAM/data/food4d.mp4',
+            '/home/luuk/development/DAM/data/food5.mp4',
+        ]
+        self.result_video = '/home/luuk/development/openFrameworks/of_v0.11.2_linux64gcc6_release/apps/myApps/faceCalibration/bin/data/result-'
+        self.relative = True
+        self.adapt_scale = True
+        self.find_best_frame = False
+        self.best_frame = None
+        self.cpu = False
+
+def generate(generator, kp_detector, opt=DefaultOptions(), driver_index=0):
+    with open(opt.config) as f:
+        config = yaml.load(f)
+
+    driver = opt.driving_videos[driver_index]
+    source_image = imageio.imread(opt.source_image)
+    reader = imageio.get_reader(driver)
+    fps = reader.get_meta_data()['fps']
+    driving_video = []
+    try:
+        for im in reader:
+            driving_video.append(im)
+    except RuntimeError:
+        pass
+    reader.close()
+
+    source_image = resize(source_image, (256, 256))[..., :3]
+    driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
+    # generator, kp_detector = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, cpu=opt.cpu)
+
+    if opt.find_best_frame or opt.best_frame is not None:
+        i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, driving_video, cpu=opt.cpu)
+        print ("Best frame: " + str(i))
+        driving_forward = driving_video[i:]
+        driving_backward = driving_video[:(i+1)][::-1]
+        predictions_forward = make_animation(source_image, driving_forward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
+        predictions_backward = make_animation(source_image, driving_backward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
+        predictions = predictions_backward[::-1] + predictions_forward[1:]
+    else:
+        predictions = make_animation(source_image, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
+    print("got predictions.saving vid")
+    imageio.mimsave("/home/luuk/development/DAM/results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in predictions], fps=fps)
+    print("saved")
+    # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
+
+
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--config", required=True, help="path to config")
@@ -139,33 +200,7 @@ if __name__ == "__main__":
     parser.set_defaults(adapt_scale=False)
 
     opt = parser.parse_args()
-    with open(opt.config) as f:
-        config = yaml.load(f)
 
-    source_image = imageio.imread(opt.source_image)
-    reader = imageio.get_reader(opt.driving_video)
-    fps = reader.get_meta_data()['fps']
-    driving_video = []
-    try:
-        for im in reader:
-            driving_video.append(im)
-    except RuntimeError:
-        pass
-    reader.close()
-
-    source_image = resize(source_image, (256, 256))[..., :3]
-    driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
-    generator, kp_detector = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, cpu=opt.cpu)
-
-    if opt.find_best_frame or opt.best_frame is not None:
-        i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, driving_video, cpu=opt.cpu)
-        print ("Best frame: " + str(i))
-        driving_forward = driving_video[i:]
-        driving_backward = driving_video[:(i+1)][::-1]
-        predictions_forward = make_animation(source_image, driving_forward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
-        predictions_backward = make_animation(source_image, driving_backward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
-        predictions = predictions_backward[::-1] + predictions_forward[1:]
-    else:
-        predictions = make_animation(source_image, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
-    imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
-
+    print("options")
+    print(opt)
+    generate(opt)
