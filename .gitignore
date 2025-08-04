@@ -1,0 +1,4 @@
+checkpoints/*
+__pycache__
+*.mp4
+first-order-model-checkpoints/*
