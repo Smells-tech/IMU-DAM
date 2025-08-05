@@ -1,4 +1,5 @@
 checkpoints/*
 __pycache__
 *.mp4
+/upload/
 first-order-model-checkpoints/*

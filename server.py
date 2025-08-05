@@ -4,7 +4,7 @@ import os
 from multiprocessing import Process
 
 app = Flask(__name__)
-app.config["RESULT_VIDEOS"] = "/home/luuk/development/DAM/results"
+app.config["RESULT_VIDEOS"] = "/home/luuk/development/IMU-DAM/results"
 
 os.makedirs(os.path.join(app.root_path, 'upload'), exist_ok=True)
 opt=DefaultOptions()

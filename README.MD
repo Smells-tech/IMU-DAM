@@ -22,8 +22,8 @@ Train DAM
     
 Train HDAM
 
-    CUDA_VISIBLE_DEVICES=0 python equivariance_detection.py --config config/dataset-dam.yaml --config_hdam config/dataset-hdam.yaml --checkpoint path/to/dam/model.pth
-    CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 run.py --config config/dataset-hdam.yaml --checkpoint path/to/dam/model.pth
+    CUDA_VISIBLE_DEVICES=0 python equivariance_detection.py --config config/dataset-dam.yaml --config_hdam config/dataset-hdam.yaml --checkpoint path/to/IMU-DAM/model.pth
+    CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 run.py --config config/dataset-hdam.yaml --checkpoint path/to/IMU-DAM/model.pth
  
 ## **Evaluation**
 Evaluate video reconstruction with following command, for more metrics, we recommend to see [FOMM-Pose-Evaluation](https://github.com/AliaksandrSiarohin/pose-evaluation).
