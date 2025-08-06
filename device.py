@@ -17,3 +17,4 @@ if cuda_enabled:
     print(f"allow tf32: {torch.backends.cuda.matmul.allow_tf32}\n")
 else:
     device = 'cpu'
+    print(f'WARNING:\tCurrent device is {device.upper()}')
