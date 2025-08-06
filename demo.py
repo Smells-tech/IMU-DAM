@@ -58,9 +58,11 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
     with torch.no_grad():
         predictions = []
         source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
+        driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
         if not cpu:
             source = source.cuda()
-        driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3).cuda()
+            driving = driving.cuda()
+
         kp_source = kp_detector(source)
         kp_driving_initial = kp_detector(driving[:, :, 0])
 
@@ -71,8 +73,6 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
 
         for frame_idx in tqdm(range(driving.shape[2])):
             driving_frame = driving[:, :, frame_idx]
-            if not cpu:
-                driving_frame = driving_frame.cuda()
             kp_driving = kp_detector(driving_frame)
 
             kp_source_for_motion = {}
@@ -132,7 +132,7 @@ class DefaultOptions():
             '/home/luuk/development/IMU-DAM/data/food4d.mp4',
             '/home/luuk/development/IMU-DAM/data/food5.mp4',
         ]
-        self.result_video = '/home/luuk/development/openFrameworks/of_v0.11.2_linux64gcc6_release/apps/myApps/faceCalibration/bin/data/result-'
+        # self.result_video = '/home/luuk/development/openFrameworks/of_v0.11.2_linux64gcc6_release/apps/myApps/faceCalibration/bin/data/result-' # Not currently used???
         self.relative = True
         self.adapt_scale = True
         self.find_best_frame = False
