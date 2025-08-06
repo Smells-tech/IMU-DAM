@@ -11,6 +11,7 @@ from skimage.transform import resize
 from skimage import img_as_ubyte
 import torch
 
+from device import device
 from modules.generator import OcclusionAwareGenerator
 from modules.keypoint_detector import KPDetector
 from animate import normalize_kp
@@ -136,7 +137,7 @@ class DefaultOptions():
         self.adapt_scale = True
         self.find_best_frame = False
         self.best_frame = None
-        self.cpu = False
+        self.cpu = device == 'cpu' # Check via torch.cuda.is_available
 
 def generate(generator, kp_detector, opt=DefaultOptions(), driver_index=0):
     with open(opt.config) as f:
