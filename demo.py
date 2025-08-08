@@ -118,19 +118,19 @@ def find_best_frame(source, driving, cpu=False):
 
 class DefaultOptions():
     def __init__(self):
-        self.config = f"{os.getenv('HOME')}/IMU/IMU-DAM/config/voxceleb1-hdam.yaml"
-        self.checkpoint = f"{os.getenv('HOME')}/IMU/IMU-DAM/checkpoints/voxceleb-hdam.pth.tar"
-        self.source_image = f"{os.getenv('HOME')}/IMU/IMU-DAM/upload/source.png"
+        self.config = f"./config/voxceleb1-hdam.yaml"
+        self.checkpoint = f"./checkpoints/voxceleb-hdam.pth.tar"
+        self.source_image = f"./upload/source.png"
         self.driving_videos = [
-            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food1.mp4",
-            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food2a.mp4",
-            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food2b.mp4",
-            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food3.mp4",
-            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food4a.mp4",
-            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food4b.mp4",
-            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food4c.mp4",
-            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food4d.mp4",
-            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food5.mp4",
+            f"./data/food1.mp4",
+            f"./data/food2a.mp4",
+            f"./data/food2b.mp4",
+            f"./data/food3.mp4",
+            f"./data/food4a.mp4",
+            f"./data/food4b.mp4",
+            f"./data/food4c.mp4",
+            f"./data/food4d.mp4",
+            f"./data/food5.mp4",
         ]
         self.result_video = f"{os.getenv('HOME')}/IMU/openFrameworks/of_v0.11.2_linux64gcc6_release/apps/myApps/faceCalibration/bin/data/result-"
         self.relative = True
@@ -170,7 +170,7 @@ def generate(generator, kp_detector, opt=DefaultOptions(), driver_index=0):
     else:
         predictions = make_animation(source_image, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
     print("got predictions.saving vid")
-    imageio.mimsave(f"{os.getenv('HOME')}/IMU/IMU-DAM/results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in predictions], fps=fps)
+    imageio.mimsave(f"./results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in predictions], fps=fps)
     print("saved")
     # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
 
