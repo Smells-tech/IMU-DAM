@@ -58,11 +58,9 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
     with torch.no_grad():
         predictions = []
         source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
-        driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
         if not cpu:
             source = source.cuda()
-            driving = driving.cuda()
-
+        driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3).cuda()
         kp_source = kp_detector(source)
         kp_driving_initial = kp_detector(driving[:, :, 0])
 
@@ -73,6 +71,8 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
 
         for frame_idx in tqdm(range(driving.shape[2])):
             driving_frame = driving[:, :, frame_idx]
+            if not cpu:
+                driving_frame = driving_frame.cuda()
             kp_driving = kp_detector(driving_frame)
 
             kp_source_for_motion = {}
@@ -118,21 +118,21 @@ def find_best_frame(source, driving, cpu=False):
 
 class DefaultOptions():
     def __init__(self):
-        self.config = '/home/luuk/development/IMU-DAM/config/voxceleb1-hdam.yaml'
-        self.checkpoint = '/home/luuk/development/IMU-DAM/checkpoints/voxceleb-hdam.pth.tar'
-        self.source_image = '/home/luuk/development/IMU-DAM/upload/source.png'
+        self.config = f"{os.getenv('HOME')}/IMU/IMU-DAM/config/voxceleb1-hdam.yaml"
+        self.checkpoint = f"{os.getenv('HOME')}/IMU/IMU-DAM/checkpoints/voxceleb-hdam.pth.tar"
+        self.source_image = f"{os.getenv('HOME')}/IMU/IMU-DAM/upload/source.png"
         self.driving_videos = [
-            '/home/luuk/development/IMU-DAM/data/food1.mp4',
-            '/home/luuk/development/IMU-DAM/data/food2a.mp4',
-            '/home/luuk/development/IMU-DAM/data/food2b.mp4',
-            '/home/luuk/development/IMU-DAM/data/food3.mp4',
-            '/home/luuk/development/IMU-DAM/data/food4a.mp4',
-            '/home/luuk/development/IMU-DAM/data/food4b.mp4',
-            '/home/luuk/development/IMU-DAM/data/food4c.mp4',
-            '/home/luuk/development/IMU-DAM/data/food4d.mp4',
-            '/home/luuk/development/IMU-DAM/data/food5.mp4',
+            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food1.mp4",
+            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food2a.mp4",
+            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food2b.mp4",
+            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food3.mp4",
+            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food4a.mp4",
+            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food4b.mp4",
+            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food4c.mp4",
+            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food4d.mp4",
+            f"{os.getenv('HOME')}/IMU/IMU-DAM/data/food5.mp4",
         ]
-        # self.result_video = '/home/luuk/development/openFrameworks/of_v0.11.2_linux64gcc6_release/apps/myApps/faceCalibration/bin/data/result-' # Not currently used???
+        self.result_video = f"{os.getenv('HOME')}/IMU/openFrameworks/of_v0.11.2_linux64gcc6_release/apps/myApps/faceCalibration/bin/data/result-"
         self.relative = True
         self.adapt_scale = True
         self.find_best_frame = False
@@ -170,7 +170,7 @@ def generate(generator, kp_detector, opt=DefaultOptions(), driver_index=0):
     else:
         predictions = make_animation(source_image, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
     print("got predictions.saving vid")
-    imageio.mimsave("/home/luuk/development/IMU-DAM/results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in predictions], fps=fps)
+    imageio.mimsave(f"{os.getenv('HOME')}/IMU/IMU-DAM/results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in predictions], fps=fps)
     print("saved")
     # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
 
