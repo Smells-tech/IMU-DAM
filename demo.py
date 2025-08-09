@@ -1,6 +1,7 @@
 import matplotlib
 matplotlib.use('Agg')
 import os, sys
+from time import sleep
 import yaml
 from argparse import ArgumentParser
 from tqdm import tqdm
@@ -10,6 +11,9 @@ import numpy as np
 from skimage.transform import resize
 from skimage import img_as_ubyte
 import torch
+
+import gc
+from memory_profiler import profile
 
 from device import device
 from modules.generator import OcclusionAwareGenerator
@@ -53,14 +57,15 @@ def load_checkpoints(config_path, checkpoint_path, cpu=False):
 
     return generator, kp_detector
 
-
+@profile
 def make_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False, config=None):
     with torch.no_grad():
         predictions = []
         source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
+        driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
         if not cpu:
             source = source.cuda()
-        driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3).cuda()
+            driving = driving.cuda()
         kp_source = kp_detector(source)
         kp_driving_initial = kp_detector(driving[:, :, 0])
 
@@ -69,7 +74,9 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
         kp_driving_initial['value'] = kp_driving_initial['value'][:,0:num_kp-num_root_kp,:]
         kp_driving_initial['jacobian'] = kp_driving_initial['jacobian'][:,0:num_kp-num_root_kp,:]
 
-        for frame_idx in tqdm(range(driving.shape[2])):
+        # print(torch.cuda.memory_summary())
+
+        for frame_idx in tqdm(range(driving.shape[2])): # Melle: This the tqdm in stdout?
             driving_frame = driving[:, :, frame_idx]
             if not cpu:
                 driving_frame = driving_frame.cuda()
@@ -118,26 +125,26 @@ def find_best_frame(source, driving, cpu=False):
 
 class DefaultOptions():
     def __init__(self):
-        self.config = f"./config/voxceleb1-hdam.yaml"
-        self.checkpoint = f"./checkpoints/voxceleb-hdam.pth.tar"
-        self.source_image = f"./upload/source.png"
+        self.config = "./config/voxceleb1-hdam.yaml"
+        self.checkpoint = "./checkpoints/voxceleb-hdam.pth.tar"
+        self.source_image = "./upload/source.png"
         self.driving_videos = [
-            f"./data/food1.mp4",
-            f"./data/food2a.mp4",
-            f"./data/food2b.mp4",
-            f"./data/food3.mp4",
-            f"./data/food4a.mp4",
-            f"./data/food4b.mp4",
-            f"./data/food4c.mp4",
-            f"./data/food4d.mp4",
-            f"./data/food5.mp4",
+            "./data/food1.mp4",
+            "./data/food2a.mp4",
+            "./data/food2b.mp4",
+            "./data/food3.mp4",
+            "./data/food4a.mp4",
+            "./data/food4b.mp4",
+            "./data/food4c.mp4",
+            "./data/food4d.mp4",
+            "./data/food5.mp4",
         ]
-        self.result_video = f"{os.getenv('HOME')}/IMU/openFrameworks/of_v0.11.2_linux64gcc6_release/apps/myApps/faceCalibration/bin/data/result-"
+        self.result_video = f"{os.getenv('HOME')}/IMU/openFrameworks/of_v0.11.2_linux64gcc6_release/apps/myApps/faceCalibration/bin/data/result-" # TODO: Is this being used?
         self.relative = True
         self.adapt_scale = True
         self.find_best_frame = False
         self.best_frame = None
-        self.cpu = device == 'cpu' # Check via torch.cuda.is_available
+        self.cpu = device == 'cpu' # Checks using torch.cuda.is_available
 
 def generate(generator, kp_detector, opt=DefaultOptions(), driver_index=0):
     with open(opt.config) as f:
@@ -147,32 +154,32 @@ def generate(generator, kp_detector, opt=DefaultOptions(), driver_index=0):
     source_image = imageio.imread(opt.source_image)
     reader = imageio.get_reader(driver)
     fps = reader.get_meta_data()['fps']
-    driving_video = []
+    video = []
     try:
         for im in reader:
-            driving_video.append(im)
+            video.append(im)
     except RuntimeError:
         pass
     reader.close()
 
     source_image = resize(source_image, (256, 256))[..., :3]
-    driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
+    video = [resize(frame, (256, 256))[..., :3] for frame in video]
     # generator, kp_detector = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, cpu=opt.cpu)
 
     if opt.find_best_frame or opt.best_frame is not None:
-        i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, driving_video, cpu=opt.cpu)
+        i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, video, cpu=opt.cpu)
         print ("Best frame: " + str(i))
-        driving_forward = driving_video[i:]
-        driving_backward = driving_video[:(i+1)][::-1]
-        predictions_forward = make_animation(source_image, driving_forward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
-        predictions_backward = make_animation(source_image, driving_backward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
-        predictions = predictions_backward[::-1] + predictions_forward[1:]
+        forward = video[i:]
+        backward = video[:(i+1)][::-1]
+        forward = make_animation(source_image, forward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
+        backward = make_animation(source_image, backward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
+        video = backward[::-1] + forward[1:]
     else:
-        predictions = make_animation(source_image, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
+        video = make_animation(source_image, video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
     print("got predictions.saving vid")
-    imageio.mimsave(f"./results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in predictions], fps=fps)
+    imageio.mimsave("./results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in video], fps=fps)
     print("saved")
-    # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
+    # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in video], fps=fps)
 
 
 

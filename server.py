@@ -1,7 +1,9 @@
 from flask import Flask, request, send_from_directory
 from demo import generate as generate_fake, load_checkpoints, DefaultOptions
-import os
+import os, gc
 from multiprocessing import Process
+
+from memory_profiler import profile
 
 app = Flask(__name__)
 app.config["RESULT_VIDEOS"] = f"./results"
@@ -18,7 +20,6 @@ generator, kp_detector = load_checkpoints(
 def hello_world():
     return 'done!'
 
-
 @app.route("/upload", methods=["POST"])
 def upload():
     if request.method == "POST":
@@ -29,10 +30,11 @@ def upload():
     else:
         return "NOT OK", 500
 
-
+@profile
 @app.route("/generate/<index>")
 def generate(index):
     generate_fake(generator, kp_detector, driver_index=int(index))
+    gc.collect() # Collect garbage; Clean memory
     return send_from_directory(app.config['RESULT_VIDEOS'], 'result-'+index+'.mp4')
 
 if __name__ == '__main__':
