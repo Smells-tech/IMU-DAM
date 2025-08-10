@@ -1,5 +1,7 @@
 checkpoints/*
 __pycache__
 *.mp4
+mprofile*.dat
+memory_usage.png
 /upload/
 first-order-model-checkpoints/*
