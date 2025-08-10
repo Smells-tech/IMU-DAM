@@ -1,12 +1,12 @@
 from flask import Flask, request, send_from_directory
-from demo import generate as generate_fake, load_checkpoints, DefaultOptions
+from demo import generate as generate_fake, load_checkpoints, DefaultOptions, print_globs
 import os, gc
 from multiprocessing import Process
 
-from memory_profiler import profile
+from memory_profiler import profile, memory_usage
 
 app = Flask(__name__)
-app.config["RESULT_VIDEOS"] = f"./results"
+app.config["RESULT_VIDEOS"] = "./results"
 
 os.makedirs(os.path.join(app.root_path, 'upload'), exist_ok=True)
 opt=DefaultOptions()
@@ -33,8 +33,18 @@ def upload():
 @profile
 @app.route("/generate/<index>")
 def generate(index):
-    generate_fake(generator, kp_detector, driver_index=int(index))
+
+    # generate_fake(generator, kp_detector, driver_index=int(index))
+
+    mem_usage = memory_usage((generate_fake, (generator, kp_detector), {'driver_index':int(index)}))
+    func_memory = max(mem_usage) - min(mem_usage)
+    print(f"Max memory usage during function call: {max(mem_usage)} MB")
+    print(f"Memory used by function: {func_memory} MB")
+    print(f"Memory used outside <func generate>: {max(mem_usage) - func_memory} MB")
+    print_globs()
+
     gc.collect() # Collect garbage; Clean memory
+
     return send_from_directory(app.config['RESULT_VIDEOS'], 'result-'+index+'.mp4')
 
 if __name__ == '__main__':

@@ -1,20 +1,27 @@
+# Matplotlib with appropriate backend
 import matplotlib
 matplotlib.use('Agg')
+
+# Native
 import os, sys
 from time import sleep
+import types
 import yaml
 from argparse import ArgumentParser
-from tqdm import tqdm
 
+# 3rd party
+from tqdm import tqdm
 import imageio
 import numpy as np
 from skimage.transform import resize
 from skimage import img_as_ubyte
 import torch
 
+# Debug
 import gc
 from memory_profiler import profile
 
+# local
 from device import device
 from modules.generator import OcclusionAwareGenerator
 from modules.keypoint_detector import KPDetector
@@ -57,7 +64,14 @@ def load_checkpoints(config_path, checkpoint_path, cpu=False):
 
     return generator, kp_detector
 
-@profile
+def print_globs():
+    for var_name, var_val in globals().items():
+        size = sys.getsizeof(var_val)
+        if not isinstance(var_val, types.FunctionType):
+            var_type = str(type(var_val)).split("'", maxsplit=1)[-1]
+            var = f"{var_name}: {var_type}"
+            print(f"{var:<75}SIZE: {size/1024/1024:.3f}mb")
+
 def make_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False, config=None):
     with torch.no_grad():
         predictions = []
@@ -76,10 +90,8 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
 
         # print(torch.cuda.memory_summary())
 
-        for frame_idx in tqdm(range(driving.shape[2])): # Melle: This the tqdm in stdout?
+        for frame_idx in tqdm(range(driving.shape[2])):
             driving_frame = driving[:, :, frame_idx]
-            if not cpu:
-                driving_frame = driving_frame.cuda()
             kp_driving = kp_detector(driving_frame)
 
             kp_source_for_motion = {}
