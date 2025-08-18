@@ -138,6 +138,7 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
                 video_writer.append_data(frame_uint8)
             else:
                 predictions.append(frame_uint8)
+            nonlocal frames
             frames += 1
 
         def interpolate(x, **kwargs):
