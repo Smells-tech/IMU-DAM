@@ -289,12 +289,11 @@ def generate(generator, kp_detector, upscaler=False, opt=DefaultOptions(), drive
                 upscaler_frames=opt.upscaler_input_frames,
                 video_writer=video_writer,
             )
-    print("got predictions.saving vid")
+    # print("got predictions.saving vid")
     # imageio.mimsave("./results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in video], fps=fps)
-    print("saved")
     # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in video], fps=fps)
 
-
+    print("Video saved")
 
 if __name__ == "__main__":
     parser = ArgumentParser()
