@@ -1,8 +1,9 @@
 from flask import Flask, request, send_from_directory
-from demo import generate as generate_fake, load_checkpoints, DefaultOptions, print_globs
+from demo import generate as generate_fake, load_checkpoints, DefaultOptions, print_globs, load_upscaler
 import os, gc
 from multiprocessing import Process
 
+import torch
 from memory_profiler import profile, memory_usage
 
 app = Flask(__name__)
@@ -15,6 +16,13 @@ generator, kp_detector = load_checkpoints(
         checkpoint_path=opt.checkpoint,
         cpu=opt.cpu
     )
+if opt.upscaler_path:
+    upscaler = load_upscaler(opt.upscaler_path)
+else:
+    upscaler = False
+
+print("\n"*3, "GPU MEMORY SUMMARY:")
+print(torch.cuda.memory_summary())
 
 @app.route('/')
 def hello_world():
@@ -36,7 +44,7 @@ def generate(index):
 
     # generate_fake(generator, kp_detector, driver_index=int(index))
 
-    mem_usage = memory_usage((generate_fake, (generator, kp_detector), {'driver_index':int(index)}))
+    mem_usage = memory_usage((generate_fake, (generator, kp_detector), {'driver_index':int(index), 'upscaler':upscaler}))
     func_memory = max(mem_usage) - min(mem_usage)
     print(f"Max memory usage during function call: {max(mem_usage)} MB")
     print(f"Memory used by function: {func_memory} MB")

@@ -5,6 +5,7 @@ matplotlib.use('Agg')
 # Native
 import os, sys
 from time import sleep
+import torch.nn.functional
 import types
 import yaml
 from argparse import ArgumentParser
@@ -16,17 +17,43 @@ import numpy as np
 from skimage.transform import resize
 from skimage import img_as_ubyte
 import torch
+from torch.nn.functional import interpolate
+from scipy.spatial import ConvexHull
 
 # Debug
 import gc
 from memory_profiler import profile
 
-# local
+# Rooot
 from device import device
 from modules.generator import OcclusionAwareGenerator
 from modules.keypoint_detector import KPDetector
 from animate import normalize_kp
-from scipy.spatial import ConvexHull
+
+class DefaultOptions():
+    def __init__(self):
+        self.config = "./config/voxceleb1-hdam.yaml"
+        self.checkpoint = "./checkpoints/voxceleb-hdam.pth.tar"
+        self.upscaler_path = "./upscaler/model.pt"
+        self.upscaler_input_frames = 5
+        self.source_image = "./upload/source.png"
+        self.driving_videos = [
+            "./data/food1.mp4",
+            "./data/food2a.mp4",
+            "./data/food2b.mp4",
+            "./data/food3.mp4",
+            "./data/food4a.mp4",
+            "./data/food4b.mp4",
+            "./data/food4c.mp4",
+            "./data/food4d.mp4",
+            "./data/food5.mp4",
+        ]
+        # self.result_video = f"{os.getenv('HOME')}/IMU/openFrameworks/of_v0.11.2_linux64gcc6_release/apps/myApps/faceCalibration/bin/data/result-" # TODO: Is this being used?
+        self.relative = True
+        self.adapt_scale = True
+        self.find_best_frame = False
+        self.best_frame = None
+        self.cpu = device == 'cpu' # Checks using torch.cuda.is_available
 
 
 if sys.version_info[0] < 3:
@@ -64,6 +91,13 @@ def load_checkpoints(config_path, checkpoint_path, cpu=False):
 
     return generator, kp_detector
 
+def load_upscaler(upscaler_path, cpu=False):
+    upscaler = torch.load(upscaler_path)
+    if not cpu:
+        upscaler.cuda()
+    return upscaler
+
+
 def print_globs():
     for var_name, var_val in globals().items():
         size = sys.getsizeof(var_val)
@@ -72,11 +106,17 @@ def print_globs():
             var = f"{var_name}: {var_type}"
             print(f"{var:<75}SIZE: {size/1024/1024:.3f}mb")
 
-def make_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False, config=None):
+def make_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False, config=None, upscaler=False, upscaler_frames=1):
     with torch.no_grad():
+
         predictions = []
+        buffer = []
+        mod = upscaler_frames // 2
+
         source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
-        driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
+        driving = torch.tensor(
+            np.array(driving_video)[np.newaxis].astype(np.float32)
+        ).permute(0, 4, 1, 2, 3)
         if not cpu:
             source = source.cuda()
             driving = driving.cuda()
@@ -88,7 +128,11 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
         kp_driving_initial['value'] = kp_driving_initial['value'][:,0:num_kp-num_root_kp,:]
         kp_driving_initial['jacobian'] = kp_driving_initial['jacobian'][:,0:num_kp-num_root_kp,:]
 
-        # print(torch.cuda.memory_summary())
+        def append(p):
+            if p.ndim > 3:
+                p = p.squeeze(0)
+            p = p.data.cpu().numpy()
+            predictions.append(np.transpose(p, [1, 2, 0]))
 
         for frame_idx in tqdm(range(driving.shape[2])):
             driving_frame = driving[:, :, frame_idx]
@@ -101,12 +145,49 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
             kp_driving_for_motion['value'] = kp_driving['value'][:,0:num_kp-num_root_kp,:]
             kp_driving_for_motion['jacobian'] = kp_driving['jacobian'][:,0:num_kp-num_root_kp,:,:]
 
-            kp_norm = normalize_kp(kp_source=kp_source_for_motion, kp_driving=kp_driving_for_motion,
-                                   kp_driving_initial=kp_driving_initial, use_relative_movement=relative,
-                                   use_relative_jacobian=relative, adapt_movement_scale=adapt_movement_scale)
+            kp_norm = normalize_kp(
+                kp_source=kp_source_for_motion,
+                kp_driving=kp_driving_for_motion,
+                kp_driving_initial=kp_driving_initial,
+                use_relative_movement=relative,
+                use_relative_jacobian=relative,
+                adapt_movement_scale=adapt_movement_scale
+            )
             out = generator(source, kp_source=kp_source_for_motion, kp_driving=kp_norm)
 
-            predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
+            if callable(upscaler):
+
+                buffer.append(out['prediction'])
+
+                print("Torch frame shape: ", buffer[-1].shape)
+
+                if len(buffer) == upscaler_frames:
+
+                    upscaled = upscaler(torch.stack(buffer[-upscaler_frames:], dim=1))
+
+                    print("Torch upscaled shape: ", buffer[-1].shape)
+
+                    if len(predictions) < mod:
+                        for f in buffer[:mod]:
+                            append(interpolate(f, size=upscaled.shape, mode='bilinear', align_corners=False))
+
+                    append(upscaled)
+                    buffer.pop(0)
+                    assert len(buffer) == upscaler_frames-1, f"Buffer length exceeded limit: {len(buffer)} / {upscaler_frames}"
+
+                    print(f"Frame {len(predictions)} / {driving.shape[2]}")
+
+            else:
+                append(out['prediction'])
+
+    if len(buffer) > 0:
+        for f in buffer[-mod:]:
+            append(interpolate(f, size=upscaled.shape, mode='bilinear', align_corners=False))
+
+        print(f"Finished: {len(predictions)} / {driving.shape[2]}")
+
+    assert len(predictions) == driving.shape[2], f"Oh boy, we've lost frames! Deepfake is length {len(predictions)} and Food is length {driving.shape[2]}"
+
     return predictions
 
 def find_best_frame(source, driving, cpu=False):
@@ -134,31 +215,7 @@ def find_best_frame(source, driving, cpu=False):
             frame_num = i
     return frame_num
 
-
-class DefaultOptions():
-    def __init__(self):
-        self.config = "./config/voxceleb1-hdam.yaml"
-        self.checkpoint = "./checkpoints/voxceleb-hdam.pth.tar"
-        self.source_image = "./upload/source.png"
-        self.driving_videos = [
-            "./data/food1.mp4",
-            "./data/food2a.mp4",
-            "./data/food2b.mp4",
-            "./data/food3.mp4",
-            "./data/food4a.mp4",
-            "./data/food4b.mp4",
-            "./data/food4c.mp4",
-            "./data/food4d.mp4",
-            "./data/food5.mp4",
-        ]
-        self.result_video = f"{os.getenv('HOME')}/IMU/openFrameworks/of_v0.11.2_linux64gcc6_release/apps/myApps/faceCalibration/bin/data/result-" # TODO: Is this being used?
-        self.relative = True
-        self.adapt_scale = True
-        self.find_best_frame = False
-        self.best_frame = None
-        self.cpu = device == 'cpu' # Checks using torch.cuda.is_available
-
-def generate(generator, kp_detector, opt=DefaultOptions(), driver_index=0):
+def generate(generator, kp_detector, upscaler=False, opt=DefaultOptions(), driver_index=0):
     with open(opt.config) as f:
         config = yaml.load(f)
 
@@ -183,11 +240,43 @@ def generate(generator, kp_detector, opt=DefaultOptions(), driver_index=0):
         print ("Best frame: " + str(i))
         forward = video[i:]
         backward = video[:(i+1)][::-1]
-        forward = make_animation(source_image, forward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
-        backward = make_animation(source_image, backward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
+        forward = make_animation(
+            source_image,
+            forward,
+            generator,
+            kp_detector,
+            relative=opt.relative,
+            adapt_movement_scale=opt.adapt_scale,
+            cpu=opt.cpu,
+            config=config,
+            upscaler=upscaler,
+            upscaler_frames=opt.upscaler_input_frames
+        )
+        backward = make_animation(
+            source_image,
+            backward, generator,
+            kp_detector,
+            relative=opt.relative,
+            adapt_movement_scale=opt.adapt_scale,
+            cpu=opt.cpu,
+            config=config,
+            upscaler=upscaler,
+            upscaler_frames=opt.upscaler_input_frames
+        )
         video = backward[::-1] + forward[1:]
     else:
-        video = make_animation(source_image, video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu, config=config)
+        video = make_animation(
+            source_image,
+            video,
+            generator,
+            kp_detector,
+            relative=opt.relative,
+            adapt_movement_scale=opt.adapt_scale,
+            cpu=opt.cpu,
+            config=config,
+            upscaler=upscaler,
+            upscaler_frames=opt.upscaler_input_frames
+        )
     print("got predictions.saving vid")
     imageio.mimsave("./results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in video], fps=fps)
     print("saved")
@@ -215,6 +304,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--cpu", dest="cpu", action="store_true", help="cpu mode.")
 
+    parser.add_argument("--upscaler", dest="upscaler", action="store_false", help="Path to upscaler model.pt")
+    parser.add_argument("--upscaler_frames", dest="upscaler_frames", default=1, help="Amount of frames to pass to upscaler")
 
     parser.set_defaults(relative=False)
     parser.set_defaults(adapt_scale=False)
