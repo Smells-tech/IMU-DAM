@@ -17,7 +17,7 @@ import numpy as np
 from skimage.transform import resize
 from skimage import img_as_ubyte
 import torch
-from torch.nn.functional import interpolate
+import torch.nn.functional as F
 from scipy.spatial import ConvexHull
 
 # Debug
@@ -58,6 +58,7 @@ class DefaultOptions():
 
 if sys.version_info[0] < 3:
     raise Exception("You must use Python 3 or higher. Recommended version is Python 3.7")
+        
 
 def load_checkpoints(config_path, checkpoint_path, cpu=False):
 
@@ -95,6 +96,7 @@ def load_upscaler(upscaler_path, cpu=False):
     upscaler = torch.load(upscaler_path)
     if not cpu:
         upscaler.cuda()
+    upscaler.eval()
     return upscaler
 
 
@@ -106,12 +108,8 @@ def print_globs():
             var = f"{var_name}: {var_type}"
             print(f"{var:<75}SIZE: {size/1024/1024:.3f}mb")
 
-def make_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False, config=None, upscaler=False, upscaler_frames=1):
+def make_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False, config=None, upscaler=False, upscaler_frames=None, video_writer=None):
     with torch.no_grad():
-
-        predictions = []
-        buffer = []
-        mod = upscaler_frames // 2
 
         source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
         driving = torch.tensor(
@@ -128,11 +126,22 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
         kp_driving_initial['value'] = kp_driving_initial['value'][:,0:num_kp-num_root_kp,:]
         kp_driving_initial['jacobian'] = kp_driving_initial['jacobian'][:,0:num_kp-num_root_kp,:]
 
+        frames = 0
+        predictions = []
+        buffer = []
+        mod = upscaler_frames // 2
         def append(p):
-            if p.ndim > 3:
-                p = p.squeeze(0)
-            p = p.data.cpu().numpy()
-            predictions.append(np.transpose(p, [1, 2, 0]))
+            p = p.data.cpu().numpy().squeeze(0)
+            frame = np.transpose(p, [1, 2, 0])   # (H, W, C)
+            frame_uint8 = img_as_ubyte(frame)    # convert to uint8
+            if video_writer is not None:
+                video_writer.append_data(frame_uint8)
+            else:
+                predictions.append(frame_uint8)
+            frames += 1
+
+        def interpolate(x, **kwargs):
+            return F.interpolate(x, **kwargs, mode='bilinear', align_corners=False)
 
         for frame_idx in tqdm(range(driving.shape[2])):
             driving_frame = driving[:, :, frame_idx]
@@ -167,28 +176,29 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
 
                     print("Torch upscaled shape: ", buffer[-1].shape)
 
-                    if len(predictions) < mod:
+                    if frames < mod:
                         for f in buffer[:mod]:
-                            append(interpolate(f, size=upscaled.shape, mode='bilinear', align_corners=False))
+                            append(interpolate(f, size=upscaled.shape))
 
                     append(upscaled)
                     buffer.pop(0)
                     assert len(buffer) == upscaler_frames-1, f"Buffer length exceeded limit: {len(buffer)} / {upscaler_frames}"
 
-                    print(f"Frame {len(predictions)} / {driving.shape[2]}")
+                    print(f"Frame {frames} / {driving.shape[2]}")
 
             else:
                 append(out['prediction'])
 
     if len(buffer) > 0:
         for f in buffer[-mod:]:
-            append(interpolate(f, size=upscaled.shape, mode='bilinear', align_corners=False))
+            append(interpolate(f, size=upscaled.shape))
 
-        print(f"Finished: {len(predictions)} / {driving.shape[2]}")
+        print(f"Finished: {frames} / {driving.shape[2]}")
 
-    assert len(predictions) == driving.shape[2], f"Oh boy, we've lost frames! Deepfake is length {len(predictions)} and Food is length {driving.shape[2]}"
+    assert frames == driving.shape[2], f"Oh boy, we've lost frames! Deepfake is length {frames} and Food is length {driving.shape[2]}"
 
-    return predictions
+    if video_writer is None:
+        return predictions
 
 def find_best_frame(source, driving, cpu=False):
     import face_alignment
@@ -265,20 +275,22 @@ def generate(generator, kp_detector, upscaler=False, opt=DefaultOptions(), drive
         )
         video = backward[::-1] + forward[1:]
     else:
-        video = make_animation(
-            source_image,
-            video,
-            generator,
-            kp_detector,
-            relative=opt.relative,
-            adapt_movement_scale=opt.adapt_scale,
-            cpu=opt.cpu,
-            config=config,
-            upscaler=upscaler,
-            upscaler_frames=opt.upscaler_input_frames
-        )
+        with imageio.get_writer(f"./results/result-{driver_index}.mp4", fps=fps) as video_writer:
+            video = make_animation(
+                source_image,
+                video,
+                generator,
+                kp_detector,
+                relative=opt.relative,
+                adapt_movement_scale=opt.adapt_scale,
+                cpu=opt.cpu,
+                config=config,
+                upscaler=upscaler,
+                upscaler_frames=opt.upscaler_input_frames,
+                video_writer=video_writer,
+            )
     print("got predictions.saving vid")
-    imageio.mimsave("./results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in video], fps=fps)
+    # imageio.mimsave("./results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in video], fps=fps)
     print("saved")
     # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in video], fps=fps)
 
