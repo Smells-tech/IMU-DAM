@@ -9,6 +9,7 @@ import torch.nn.functional
 import types
 import yaml
 from argparse import ArgumentParser
+from PIL import Image
 
 # 3rd party
 from tqdm import tqdm
@@ -108,6 +109,30 @@ def print_globs():
             var = f"{var_name}: {var_type}"
             print(f"{var:<75}SIZE: {size/1024/1024:.3f}mb")
 
+def save_tensor_frame_to_png(tensor, filename):
+    # tensor shape: [C, H, W], values usually in [0,1] or [-1,1]
+    
+    # Move tensor to CPU, detach grad, convert to numpy
+    img = tensor.clone().detach().cpu()
+
+    # If values in [-1,1], convert to [0,1]
+    if img.min() < 0:
+        img = (img + 1) / 2
+
+    # Clamp values to [0,1]
+    img = img.clamp(0, 1)
+
+    # Convert to numpy and change to HWC format
+    img = img.numpy()
+    img = np.transpose(img, (1, 2, 0))
+
+    # Convert to uint8 0-255
+    img = (img * 255).astype(np.uint8)
+
+    # Convert to PIL Image and save
+    pil_img = Image.fromarray(img)
+    pil_img.save(filename)
+
 def make_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False, config=None, upscaler=False, upscaler_frames=None, video_writer=None):
     with torch.no_grad():
 
@@ -128,8 +153,6 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
 
         frames = 0
         predictions = []
-        buffer = []
-        mod = upscaler_frames // 2
         def append(p):
             p = p.data.cpu().numpy().squeeze(0)
             frame = np.transpose(p, [1, 2, 0])   # (H, W, C)
@@ -144,6 +167,8 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
         def interpolate(x, **kwargs):
             return F.interpolate(x, **kwargs, mode='bilinear', align_corners=False)
 
+        buffer = []
+        mod = upscaler_frames // 2
         for frame_idx in tqdm(range(driving.shape[2])):
             driving_frame = driving[:, :, frame_idx]
             kp_driving = kp_detector(driving_frame)
@@ -164,18 +189,23 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
                 adapt_movement_scale=adapt_movement_scale
             )
             out = generator(source, kp_source=kp_source_for_motion, kp_driving=kp_norm)
+            p = out['prediction']
 
             if callable(upscaler):
 
-                buffer.append(out['prediction'])
+                buffer.append(p)
 
-                print("Torch frame shape: ", buffer[-1].shape)
+                print("Prediction shape: ", p.shape)
 
                 if len(buffer) == upscaler_frames:
 
                     upscaled = upscaler(torch.stack(buffer[-upscaler_frames:], dim=1))
 
-                    print("Torch upscaled shape: ", buffer[-1].shape)
+                    print("Upscaled shape: ", upscaled.shape)
+                    
+                    if frames==100: # TEST
+                        save_tensor_frame_to_png(p, 'test_raw.png')
+                        save_tensor_frame_to_png(upscaled, 'test_upscaled.png')
 
                     if frames < mod:
                         for f in buffer[:mod]:
@@ -188,7 +218,7 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
                     print(f"Frame {frames} / {driving.shape[2]}")
 
             else:
-                append(out['prediction'])
+                append(p)
 
     if len(buffer) > 0:
         for f in buffer[-mod:]:
