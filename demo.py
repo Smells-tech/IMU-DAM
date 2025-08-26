@@ -34,7 +34,8 @@ class DefaultOptions():
     def __init__(self):
         self.config = "./config/voxceleb1-hdam.yaml"
         self.checkpoint = "./checkpoints/voxceleb-hdam.pth.tar"
-        self.upscaler_path = "./upscaler/model.pt"
+        # self.upscaler_path = "./upscaler/model.pt"
+        self.upscaler_path = None
         self.upscaler_input_frames = 5
         self.source_image = "./upload/source.png"
         self.driving_videos = [
