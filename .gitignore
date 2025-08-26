@@ -5,3 +5,4 @@ mprofile*.dat
 memory_usage.png
 /upload/
 first-order-model-checkpoints/*
+stdout.txt
