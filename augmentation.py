@@ -9,7 +9,8 @@ import numpy as np
 import PIL
 
 from skimage.transform import resize, rotate
-from skimage.util import pad
+from numpy import pad
+# from skimage.util import pad # Deprecated in scikit-image 0.19+
 import torchvision
 
 import warnings

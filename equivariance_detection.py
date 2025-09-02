@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
     opt = parser.parse_args()
     with open(opt.config) as f:
-        config = yaml.load(f)
+        config = yaml.load(f,  Loader=yaml.SafeLoader)
 
     kp_detector = KPDetector(**config['model_params']['kp_detector_params'],
                              **config['model_params']['common_params'])
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     # print(equivariance_jacobian_list.shape)
 
     with open(opt.config_hdam) as f:
-        config_hdam = yaml.load(f)
+        config_hdam = yaml.load(f,  Loader=yaml.SafeLoader)
     ignore_kp_list = []
     for i in range(len(equivariance)):
         if equivariance[i] > opt.equi_threshold:

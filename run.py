@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     opt = parser.parse_args()
     with open(opt.config) as f:
-        config = yaml.load(f)
+        config = yaml.load(f,  Loader=yaml.SafeLoader)
 
     distributed = opt.local_rank >= 0
     if distributed:

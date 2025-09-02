@@ -19,6 +19,7 @@ from skimage.transform import resize
 from skimage import img_as_ubyte
 import torch
 import torch.nn.functional as F
+from torch.utils import model_zoo
 from scipy.spatial import ConvexHull
 
 # Debug
@@ -30,12 +31,14 @@ from device import device
 from modules.generator import OcclusionAwareGenerator
 from modules.keypoint_detector import KPDetector
 from animate import normalize_kp
+from super_resolution import SuperResolutionNet
 
 class DefaultOptions():
     def __init__(self):
         self.config = "./config/voxceleb1-hdam.yaml"
         self.checkpoint = "./checkpoints/voxceleb-hdam.pth.tar"
-        self.upscaler_path = "./upscaler/model.pt"
+        # self.upscaler_path = "./upscaler/model.pt"
+        self.upscaler_path = None
         self.upscaler_input_frames = 5
         self.source_image = "./upload/source.png"
         self.driving_videos = [
@@ -59,12 +62,11 @@ class DefaultOptions():
 
 if sys.version_info[0] < 3:
     raise Exception("You must use Python 3 or higher. Recommended version is Python 3.7")
-        
 
 def load_checkpoints(config_path, checkpoint_path, cpu=False):
 
     with open(config_path) as f:
-        config = yaml.load(f)
+        config = yaml.load(f,  Loader=yaml.SafeLoader)
 
     generator = OcclusionAwareGenerator(**config['model_params']['generator_params'],
                                         **config['model_params']['common_params'])
@@ -94,9 +96,14 @@ def load_checkpoints(config_path, checkpoint_path, cpu=False):
     return generator, kp_detector
 
 def load_upscaler(upscaler_path, cpu=False):
-    upscaler = torch.load(upscaler_path)
-    if not cpu:
-        upscaler.cuda()
+    dvc = 'cpu' if cpu else 'cuda'
+    if 'superres_epoch100-44c6958e' in upscaler_path:
+        upscaler = SuperResolutionNet(upscale_factor=3)
+        upscaler.load_state_dict(model_zoo.load_url(upscaler_path, torch.device(dvc)))
+    else:
+        upscaler = torch.load(upscaler_path)
+        if not cpu:
+            upscaler.cuda()
     upscaler.eval()
     return upscaler
 
@@ -258,7 +265,7 @@ def find_best_frame(source, driving, cpu=False):
 
 def generate(generator, kp_detector, upscaler=False, opt=DefaultOptions(), driver_index=0):
     with open(opt.config) as f:
-        config = yaml.load(f)
+        config = yaml.load(f,  Loader=yaml.SafeLoader)
 
     driver = opt.driving_videos[driver_index]
     source_image = imageio.imread(opt.source_image)

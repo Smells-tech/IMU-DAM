@@ -21,9 +21,6 @@ if opt.upscaler_path:
 else:
     upscaler = False
 
-print("\n"*3, "GPU MEMORY SUMMARY:")
-print(torch.cuda.memory_summary())
-
 @app.route('/')
 def hello_world():
     return 'done!'

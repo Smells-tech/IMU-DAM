@@ -25,7 +25,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", required=True, help="path to config")
     opt = parser.parse_args()
     with open(opt.config) as f:
-        config = yaml.load(f)
+        config = yaml.load(f,  Loader=yaml.SafeLoader)
 
     train_params = config['train_params']
     dataset = FramesDataset( **config['dataset_params'],is_train=True)

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import imageio
 
 import os
-from skimage.draw import circle, line
+from skimage.draw import disk, line
 
 import matplotlib.pyplot as plt
 import collections
@@ -133,7 +133,7 @@ class Visualizer:
         num_kp = self.num_kp
         for kp_ind, kp in enumerate(kp_array):
             if kp_ind == num_kp-1:
-                rr, cc = circle(kp[1], kp[0], self.kp_size*2, shape=image.shape[:2])
+                rr, cc = disk(kp[1], kp[0], self.kp_size*2, shape=image.shape[:2])
                 image[rr, cc] = np.array(self.colormap(kp_ind / num_kp ))[:3]
                 # draw line between root kp and sub_root kp
                 if self.draw_line:
@@ -146,7 +146,7 @@ class Visualizer:
                 # draw line between root kp and sub_root kp
             elif kp_ind >= num_kp-self.num_root_kp and kp_ind < num_kp-1:
                 # continue
-                rr, cc = circle(kp[1], kp[0], self.kp_size*1.5, shape=image.shape[:2])
+                rr, cc = disk(kp[1], kp[0], self.kp_size*1.5, shape=image.shape[:2])
                 image[rr, cc] = np.array(self.colormap(kp_ind / num_kp ))[:3]
                 # draw line between sub_root kp and motion kp
                 if self.draw_line:
@@ -161,7 +161,7 @@ class Visualizer:
             elif kp_ind < num_kp-self.num_root_kp:
                 if kp_ind in self.ignore_kp_list:
                     continue
-                rr, cc = circle(kp[1], kp[0], self.kp_size, shape=image.shape[:2])
+                rr, cc = disk(kp[1], kp[0], self.kp_size, shape=image.shape[:2])
                 image[rr, cc] = np.array(self.colormap(kp_ind / num_kp ))[:3]
                 # # draw number around kp
                 # # print(image.shape)
