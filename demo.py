@@ -24,7 +24,7 @@ from scipy.spatial import ConvexHull
 
 # Debug
 import gc
-from memory_profiler import profile
+# from memory_profiler import profile
 
 # Rooot
 from device import device
@@ -32,38 +32,42 @@ from modules.generator import OcclusionAwareGenerator
 from modules.keypoint_detector import KPDetector
 from animate import normalize_kp
 from super_resolution import SuperResolutionNet
+from image import feather_torch, alpha_blending, center_crop, save_tensor_frame_to_png
+
+sys.path.append(f"{os.getenv('HOME')}/IMU/synergize-motion-appearance")
+from basicsr.utils.options import ordered_yaml
+from basicsr.archs import build_network
+from basicsr.demo import load_network
 
 class DefaultOptions():
     def __init__(self):
-        self.config = "./config/voxceleb1-hdam.yaml"
+        self.config = f"{os.getenv('HOME')}/IMU/synergize-motion-appearance/options/test.yml"
+        # self.config = "./config/voxceleb1-hdam.yaml"
         self.checkpoint = "./checkpoints/voxceleb-hdam.pth.tar"
         # self.upscaler_path = "./upscaler/model.pt"
         self.upscaler_path = None
         self.upscaler_input_frames = 5
         self.source_image = "./upload/source.png"
         self.driving_videos = [
+            "./data/food0.mp4",
             "./data/food1.mp4",
-            "./data/food2a.mp4",
-            "./data/food2b.mp4",
+            "./data/food2.mp4",
             "./data/food3.mp4",
-            "./data/food4a.mp4",
-            "./data/food4b.mp4",
-            "./data/food4c.mp4",
-            "./data/food4d.mp4",
+            "./data/food4.mp4",
             "./data/food5.mp4",
+            "./data/food6.mp4",
+            "./data/food7.mp4",
+            "./data/food8.mp4",
         ]
-        # self.result_video = f"{os.getenv('HOME')}/IMU/openFrameworks/of_v0.11.2_linux64gcc6_release/apps/myApps/faceCalibration/bin/data/result-" # TODO: Is this being used?
         self.relative = True
         self.adapt_scale = True
         self.find_best_frame = False
         self.best_frame = None
         self.cpu = device == 'cpu' # Checks using torch.cuda.is_available
 
-
-if sys.version_info[0] < 3:
-    raise Exception("You must use Python 3 or higher. Recommended version is Python 3.7")
-
 def load_checkpoints(config_path, checkpoint_path, cpu=False):
+    if "synergize-motion-appearance" in config_path:
+        return load_synergize_motion(config_path=config_path, cpu=cpu)
 
     with open(config_path) as f:
         config = yaml.load(f,  Loader=yaml.SafeLoader)
@@ -95,18 +99,50 @@ def load_checkpoints(config_path, checkpoint_path, cpu=False):
 
     return generator, kp_detector
 
+def load_synergize_motion(config_path="/home/luuk/IMU/synergize-motion-appearance/options/test.yml", cpu=False, **__):
+
+    def path_root(path, root, oldroot="./"):
+        assert path[:len(oldroot)] == oldroot, f"path root mismatch, expected: {oldroot}, found: {path[:len(oldroot)]}"
+        return root + path[len(oldroot):]
+
+    with open(config_path, mode='r') as f:
+        Loader, _ = ordered_yaml()
+        config = yaml.load(f, Loader=Loader)
+
+    # load model
+    generator = build_network(config['network_g'])
+    load_path = config['path'].get('pretrain_network_g', None)
+    if load_path is not None:
+        load_path = path_root(load_path, "/home/luuk/IMU/synergize-motion-appearance/")
+        param_key = config['path'].get('param_key_g', 'params')
+        generator = load_network(generator, load_path, config['path'].get('strict_load_g', True), param_key)
+    generator.eval()
+
+    kp_detector = build_network(config['network_motion_estimator'])
+    load_path = config['path'].get('pretrain_network_motion_estimator', None)
+    if load_path is not None:
+        load_path = path_root(load_path, "/home/luuk/IMU/synergize-motion-appearance/")
+        param_key = config['path'].get('param_key_m', 'params')
+        kp_detector = load_network(kp_detector, load_path, config['path'].get('strict_load_motion_estimator', True), param_key)
+    kp_detector.eval()
+
+    if not cpu:
+        generator.cuda()
+        kp_detector.cuda()
+    return generator, kp_detector
+
 def load_upscaler(upscaler_path, cpu=False):
-    dvc = 'cpu' if cpu else 'cuda'
     if 'superres_epoch100-44c6958e' in upscaler_path:
         upscaler = SuperResolutionNet(upscale_factor=3)
-        upscaler.load_state_dict(model_zoo.load_url(upscaler_path, torch.device(dvc)))
+        upscaler.load_state_dict(model_zoo.load_url(upscaler_path, torch.device('cpu' if cpu else 'cuda')))
     else:
         upscaler = torch.load(upscaler_path)
-        if not cpu:
-            upscaler.cuda()
-    upscaler.eval()
-    return upscaler
 
+    if not cpu:
+        upscaler.cuda()
+    upscaler.eval()
+
+    return upscaler
 
 def print_globs():
     for var_name, var_val in globals().items():
@@ -116,91 +152,74 @@ def print_globs():
             var = f"{var_name}: {var_type}"
             print(f"{var:<75}SIZE: {size/1024/1024:.3f}mb")
 
-def save_tensor_frame_to_png(tensor, filename):
-    # tensor shape: [C, H, W], values usually in [0,1] or [-1,1]
-    
-    # Move tensor to CPU, detach grad, convert to numpy
-    img = tensor.clone().detach().cpu()
+def make_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False, upscaler=False, upscaler_frames=None, video_writer=None):
+    try:
+        driving_length = driving_video.count_frames()  # If available, more reliable
+    except AttributeError:
+        driving_length = driving_video.get_length()    # Fallback method
 
-    # If values in [-1,1], convert to [0,1]
-    if img.min() < 0:
-        img = (img + 1) / 2
+    frames = 0
+    predictions = []
+    def append(p):
+        p = p.data.cpu().numpy().squeeze(0)
+        p = np.transpose(p, [1, 2, 0])   # transpose to (H, W, C)
+        p = np.clip(p, a_min=-1, a_max=1)
+        if video_writer is not None:
+            video_writer.append_data(img_as_ubyte(p)) # convert to uint8
+        else:
+            predictions.append(img_as_ubyte(p)) # convert to uint8
+        nonlocal frames
+        frames += 1
 
-    # Clamp values to [0,1]
-    img = img.clamp(0, 1)
+    def feather(t):
+        return feather_torch(t, each=10)
 
-    # Convert to numpy and change to HWC format
-    img = img.numpy()
-    img = np.transpose(img, (1, 2, 0))
+    def interpolate(x, **kwargs):
+        return F.interpolate(x, **kwargs, mode='bilinear', align_corners=False)
 
-    # Convert to uint8 0-255
-    img = (img * 255).astype(np.uint8)
+    def load(f, size=(256, 256)):
+        f = center_crop(f, *size)
+        f = resize(f, size)[..., :3] # Ignore alpha channel
+        f = torch.tensor(f[None, ...].astype(np.float32)).permute(0, 3, 1, 2)
+        if not cpu:
+            f = f.cuda()
+        return f
 
-    # Convert to PIL Image and save
-    pil_img = Image.fromarray(img)
-    pil_img.save(filename)
-
-def make_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False, config=None, upscaler=False, upscaler_frames=None, video_writer=None):
     with torch.no_grad():
 
-        source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
-        driving = torch.tensor(
-            np.array(driving_video)[np.newaxis].astype(np.float32)
-        ).permute(0, 4, 1, 2, 3)
-        if not cpu:
-            source = source.cuda()
-            driving = driving.cuda()
-        kp_source = kp_detector(source)
-        kp_driving_initial = kp_detector(driving[:, :, 0])
+        source = load(alpha_blending(source_image))
+        driving0 = load(driving_video.get_data(0))
 
-        num_kp = config['model_params']['common_params']['num_kp']
-        num_root_kp = config['model_params']['generator_params']['num_root_kp']
-        kp_driving_initial['value'] = kp_driving_initial['value'][:,0:num_kp-num_root_kp,:]
-        kp_driving_initial['jacobian'] = kp_driving_initial['jacobian'][:,0:num_kp-num_root_kp,:]
+        kp_source = kp_detector.estimate_kp(source)
+        kp_driving_initial = kp_detector.estimate_kp(driving0)
 
-        frames = 0
-        predictions = []
-        def append(p):
-            p = p.data.cpu().numpy().squeeze(0)
-            frame = np.transpose(p, [1, 2, 0])   # (H, W, C)
-            frame_uint8 = img_as_ubyte(frame)    # convert to uint8
-            if video_writer is not None:
-                video_writer.append_data(frame_uint8)
-            else:
-                predictions.append(frame_uint8)
-            nonlocal frames
-            frames += 1
-
-        def interpolate(x, **kwargs):
-            return F.interpolate(x, **kwargs, mode='bilinear', align_corners=False)
-
+        # Upscaler buffer
         buffer = []
         mod = upscaler_frames // 2
-        for frame_idx in tqdm(range(driving.shape[2])):
-            driving_frame = driving[:, :, frame_idx]
-            kp_driving = kp_detector(driving_frame)
 
-            kp_source_for_motion = {}
-            kp_source_for_motion['value'] = kp_source['value'][:,0:num_kp-num_root_kp,:]
-            kp_source_for_motion['jacobian'] = kp_source['jacobian'][:,0:num_kp-num_root_kp,:,:]
-            kp_driving_for_motion = {}
-            kp_driving_for_motion['value'] = kp_driving['value'][:,0:num_kp-num_root_kp,:]
-            kp_driving_for_motion['jacobian'] = kp_driving['jacobian'][:,0:num_kp-num_root_kp,:,:]
+        # Generator loop
+        for driving_frame in tqdm(driving_video, total=driving_length):
+            driving_frame = load(driving_frame)
+
+            kp_driving = kp_detector.estimate_kp(driving_frame)
 
             kp_norm = normalize_kp(
-                kp_source=kp_source_for_motion,
-                kp_driving=kp_driving_for_motion,
+                kp_source=kp_source,
+                kp_driving=kp_driving,
                 kp_driving_initial=kp_driving_initial,
                 use_relative_movement=relative,
                 use_relative_jacobian=relative,
                 adapt_movement_scale=adapt_movement_scale
             )
-            out = generator(source, kp_source=kp_source_for_motion, kp_driving=kp_norm)
-            p = out['prediction']
 
+            dense_motion = kp_detector.estimate_motion_w_kp(kp_source=kp_source, kp_driving=kp_norm, source_image=source)
+            out_dict = generator(source, dense_motion, w=1, inference=True)
+            p = out_dict['out']
+
+            # Upscale center frame using video SR model with multiple input frames for temporal coherence
             if callable(upscaler):
 
-                buffer.append(p)
+                buffer.append(feather(p))
 
                 print("Prediction shape: ", p.shape)
 
@@ -209,31 +228,32 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
                     upscaled = upscaler(torch.stack(buffer[-upscaler_frames:], dim=1))
 
                     print("Upscaled shape: ", upscaled.shape)
-                    
+
                     if frames==100: # TEST
                         save_tensor_frame_to_png(p, 'test_raw.png')
                         save_tensor_frame_to_png(upscaled, 'test_upscaled.png')
 
                     if frames < mod:
                         for f in buffer[:mod]:
-                            append(interpolate(f, size=upscaled.shape))
+                            append(feather(interpolate(f, size=upscaled.shape)))
 
-                    append(upscaled)
+                    append(feather(upscaled))
                     buffer.pop(0)
                     assert len(buffer) == upscaler_frames-1, f"Buffer length exceeded limit: {len(buffer)} / {upscaler_frames}"
 
-                    print(f"Frame {frames} / {driving.shape[2]}")
+                    print(f"Frame {frames} / {driving_length}")
 
             else:
-                append(p)
+
+                append(feather(p))
 
     if len(buffer) > 0:
         for f in buffer[-mod:]:
-            append(interpolate(f, size=upscaled.shape))
+            append(feather(interpolate(f, size=upscaled.shape)))
 
-        print(f"Finished: {frames} / {driving.shape[2]}")
+        print(f"Finished: {frames} / {driving_length}")
 
-    assert frames == driving.shape[2], f"Oh boy, we've lost frames! Deepfake is length {frames} and Food is length {driving.shape[2]}"
+    assert frames == driving_length, f"Oh boy, we've lost frames! Deepfake is length {frames} and Food is length {driving_length}"
 
     if video_writer is None:
         return predictions
@@ -264,25 +284,25 @@ def find_best_frame(source, driving, cpu=False):
     return frame_num
 
 def generate(generator, kp_detector, upscaler=False, opt=DefaultOptions(), driver_index=0):
-    with open(opt.config) as f:
-        config = yaml.load(f,  Loader=yaml.SafeLoader)
-
     driver = opt.driving_videos[driver_index]
     source_image = imageio.imread(opt.source_image)
-    reader = imageio.get_reader(driver)
-    fps = reader.get_meta_data()['fps']
-    video = []
-    try:
-        for im in reader:
-            video.append(im)
-    except RuntimeError:
-        pass
-    reader.close()
 
-    source_image = resize(source_image, (256, 256))[..., :3]
-    video = [resize(frame, (256, 256))[..., :3] for frame in video]
-    # generator, kp_detector = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, cpu=opt.cpu)
+    # reader = imageio.get_reader(driver)
+    # fps = reader.get_meta_data()['fps']
+    # video = []
+    # try:
+    #     for im in reader:
+    #         video.append(im)
+    # except RuntimeError:
+    #     pass
+    # reader.close()
 
+    # source_image = resize(source_image, (256, 256))[..., :3]
+    # video = [resize(frame, (256, 256))[..., :3] for frame in video]
+
+    result_path = f"./results/result-{driver_index}.mp4"
+
+    # TODO: Find best frame method currently NOT working. Add clause in make_animation to distinguish between video_reader and video_writer or numpy array
     if opt.find_best_frame or opt.best_frame is not None:
         i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, video, cpu=opt.cpu)
         print ("Best frame: " + str(i))
@@ -296,7 +316,6 @@ def generate(generator, kp_detector, upscaler=False, opt=DefaultOptions(), drive
             relative=opt.relative,
             adapt_movement_scale=opt.adapt_scale,
             cpu=opt.cpu,
-            config=config,
             upscaler=upscaler,
             upscaler_frames=opt.upscaler_input_frames
         )
@@ -307,60 +326,68 @@ def generate(generator, kp_detector, upscaler=False, opt=DefaultOptions(), drive
             relative=opt.relative,
             adapt_movement_scale=opt.adapt_scale,
             cpu=opt.cpu,
-            config=config,
             upscaler=upscaler,
             upscaler_frames=opt.upscaler_input_frames
         )
         video = backward[::-1] + forward[1:]
+        # imageio.mimsave(result_path, [img_as_ubyte(frame) for frame in video], fps=fps)
     else:
-        with imageio.get_writer(f"./results/result-{driver_index}.mp4", fps=fps) as video_writer:
-            video = make_animation(
-                source_image,
-                video,
-                generator,
-                kp_detector,
-                relative=opt.relative,
-                adapt_movement_scale=opt.adapt_scale,
-                cpu=opt.cpu,
-                config=config,
-                upscaler=upscaler,
-                upscaler_frames=opt.upscaler_input_frames,
-                video_writer=video_writer,
-            )
-    # print("got predictions.saving vid")
-    # imageio.mimsave("./results/result-" + str(driver_index) + '.mp4', [img_as_ubyte(frame) for frame in video], fps=fps)
-    # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in video], fps=fps)
-
-    print("Video saved")
+        with imageio.get_reader(driver) as reader:
+            fps = reader.get_meta_data()['fps']
+            with imageio.get_writer(result_path, fps=fps) as video_writer:
+                make_animation(
+                    source_image,
+                    reader,
+                    generator,
+                    kp_detector,
+                    relative=opt.relative,
+                    adapt_movement_scale=opt.adapt_scale,
+                    cpu=opt.cpu,
+                    upscaler=upscaler,
+                    upscaler_frames=opt.upscaler_input_frames,
+                    video_writer=video_writer,
+                )
+    print(f"{result_path} saved")
 
 if __name__ == "__main__":
+    opt=DefaultOptions()
+
     parser = ArgumentParser()
-    parser.add_argument("--config", required=True, help="path to config")
-    parser.add_argument("--checkpoint", default='vox-cpk.pth.tar', help="path to checkpoint to restore")
+    parser.add_argument("--config", default=opt.config, help="path to config")
+    parser.add_argument("--checkpoint", default=opt.checkpoint, help="path to checkpoint to restore")
 
-    parser.add_argument("--source_image", default='sup-mat/source.png', help="path to source image")
-    parser.add_argument("--driving_video", default='sup-mat/source.png', help="path to driving video")
-    parser.add_argument("--result_video", default='result.mp4', help="path to output")
+    parser.add_argument("--source_image", default='upload/source.png', help="path to source image")
+    parser.add_argument("--driving_video", default='data/food0.mp4', help="path to driving video")
+    parser.add_argument("--result_video", default='test-0.mp4', help="path to output")
 
-    parser.add_argument("--relative", dest="relative", action="store_true", help="use relative or absolute keypoint coordinates")
-    parser.add_argument("--adapt_scale", dest="adapt_scale", action="store_true", help="adapt movement scale based on convex hull of keypoints")
-
-    parser.add_argument("--find_best_frame", dest="find_best_frame", action="store_true",
+    parser.add_argument("--relative", dest="relative", action="store_true" if opt.relative else "store_false",
+                        help="use relative or absolute keypoint coordinates")
+    parser.add_argument("--adapt_scale", dest="adapt_scale", action="store_true" if opt.adapt_scale else "store_false",
+                        help="adapt movement scale based on convex hull of keypoints")
+    parser.add_argument("--find_best_frame", dest="find_best_frame", action="store_true" if opt.find_best_frame else "store_false",
                         help="Generate from the frame that is the most alligned with source. (Only for faces, requires face_aligment lib)")
-
-    parser.add_argument("--best_frame", dest="best_frame", type=int, default=None,
+    parser.add_argument("--best_frame", dest="best_frame", type=int, default=opt.best_frame,
                         help="Set frame to start from.")
 
-    parser.add_argument("--cpu", dest="cpu", action="store_true", help="cpu mode.")
+    parser.add_argument("--cpu", dest="cpu", action="store_true" if device == "cpu" else "store_false", help="cpu mode.")
 
-    parser.add_argument("--upscaler", dest="upscaler", action="store_false", help="Path to upscaler model.pt")
+    parser.add_argument("--upscaler", dest="upscaler_path", action="store_false", help="Path to upscaler model.pt")
+    parser.set_defaults(upscaler_path=False)
     parser.add_argument("--upscaler_frames", dest="upscaler_frames", default=1, help="Amount of frames to pass to upscaler")
 
-    parser.set_defaults(relative=False)
-    parser.set_defaults(adapt_scale=False)
 
     opt = parser.parse_args()
-
     print("options")
     print(opt)
-    generate(opt)
+
+    generator, kp_detector = load_checkpoints(
+        config_path=opt.config,
+        checkpoint_path=opt.checkpoint,
+        cpu=opt.cpu
+    )
+    if opt.upscaler_path:
+        upscaler = load_upscaler(opt.upscaler_path)
+    else:
+        upscaler = False
+
+    generate(generator, kp_detector, opt)

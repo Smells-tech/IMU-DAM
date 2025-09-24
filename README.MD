@@ -6,6 +6,14 @@ The model are trained on 4 Tesla V100 cards, pytorch vesion 1.6 and 1.8 with pyt
 
     pip install -r requirements.txt
 
+## **MELLE's env**
+    
+    conda create -n DAM python=3.8.20
+    conda activate DAM
+    conda install pytorch=1.12.1 torchvision=0.13.1 torchaudio=0.12.1 pytorch-cuda=11.6 -c pytorch -c nvidia
+    conda install einops lpips pandas pillow onnxruntime scikit-image scikit-learn scipy imageio imageio-ffmpeg matplotlib pyyaml timm tqdm dataclasses memory_profiler flask ffmpeg-python
+    pip install decord insightface flow-vis mediapipe
+
 ## **Datasets**
 **TaiChiHD**,**Voxceleb1**,**FashionVideo**,**MGIF**, all following [FOMM](https://github.com/AliaksandrSiarohin/first-order-model). After downloading and pre-processing, the dataset should be placed in the `./data` folder or you can change the parameter `root_dir` in the yaml config file. Note that we save the video dataset with png frames format (for example,`./data/taichi-png/train/video-id/frames-id.png`), for better training IO performance. All train and test video frames are specified in txt files in the `./data` folder.
 

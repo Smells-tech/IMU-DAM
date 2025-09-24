@@ -1,10 +1,11 @@
 from flask import Flask, request, send_from_directory
 from demo import generate as generate_fake, load_checkpoints, DefaultOptions, print_globs, load_upscaler
-import os, gc
+import os, gc, sys
 from multiprocessing import Process
+# sys.path.append('/home/luuk/IMU/synergize-motion-appearance')
 
 import torch
-from memory_profiler import profile, memory_usage
+# from memory_profiler import profile, memory_usage
 
 app = Flask(__name__)
 app.config["RESULT_VIDEOS"] = "./results"
@@ -35,18 +36,18 @@ def upload():
     else:
         return "NOT OK", 500
 
-@profile
+# @profile
 @app.route("/generate/<index>")
 def generate(index):
 
-    # generate_fake(generator, kp_detector, driver_index=int(index))
+    generate_fake(generator, kp_detector, driver_index=int(index))
 
-    mem_usage = memory_usage((generate_fake, (generator, kp_detector), {'driver_index':int(index), 'upscaler':upscaler}))
-    func_memory = max(mem_usage) - min(mem_usage)
-    print(f"Max memory usage during function call: {max(mem_usage)} MB")
-    print(f"Memory used by function: {func_memory} MB")
-    print(f"Memory used outside <func generate>: {max(mem_usage) - func_memory} MB")
-    print_globs()
+    # mem_usage = memory_usage((generate_fake, (generator, kp_detector), {'driver_index':int(index), 'upscaler':upscaler}))
+    # func_memory = max(mem_usage) - min(mem_usage)
+    # print(f"Max memory usage during function call: {max(mem_usage)} MB")
+    # print(f"Memory used by function: {func_memory} MB")
+    # print(f"Memory used outside <func generate>: {max(mem_usage) - func_memory} MB")
+    # print_globs()
 
     gc.collect() # Collect garbage; Clean memory
 
