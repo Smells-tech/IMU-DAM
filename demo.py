@@ -41,13 +41,14 @@ from basicsr.demo import load_network
 
 class DefaultOptions():
     def __init__(self):
+        self.debug = True
         self.config = f"{os.getenv('HOME')}/IMU/synergize-motion-appearance/options/test.yml"
         # self.config = "./config/voxceleb1-hdam.yaml"
         self.checkpoint = "./checkpoints/voxceleb-hdam.pth.tar"
         # self.upscaler_path = "./upscaler/model.pt"
         self.upscaler_path = None
         self.upscaler_input_frames = 5
-        self.source_image = "./upload/source.png"
+        self.source_image = "./upload/source.png" if not self.debug else "./upload/debug.png"
         self.driving_videos = [
             "./data/food0.mp4",
             "./data/food1.mp4",
