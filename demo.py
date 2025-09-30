@@ -32,7 +32,7 @@ from modules.generator import OcclusionAwareGenerator
 from modules.keypoint_detector import KPDetector
 from animate import normalize_kp
 from super_resolution import SuperResolutionNet
-from image import feather_torch, alpha_blending, center_crop, save_tensor_frame_to_png
+from image import feather_torch, alpha_blending, alpha_blending_torch, center_crop, save_tensor_frame_to_png
 
 sys.path.append(f"{os.getenv('HOME')}/IMU/synergize-motion-appearance")
 from basicsr.utils.options import ordered_yaml
@@ -41,14 +41,15 @@ from basicsr.demo import load_network
 
 class DefaultOptions():
     def __init__(self):
-        self.debug = True
+        # self.debug = False
         self.config = f"{os.getenv('HOME')}/IMU/synergize-motion-appearance/options/test.yml"
         # self.config = "./config/voxceleb1-hdam.yaml"
         self.checkpoint = "./checkpoints/voxceleb-hdam.pth.tar"
         # self.upscaler_path = "./upscaler/model.pt"
         self.upscaler_path = None
         self.upscaler_input_frames = 5
-        self.source_image = "./upload/source.png" if not self.debug else "./upload/debug.png"
+        self.source_image = "./upload/source.png"
+        # self.source_image = "./upload/source.png" if not self.debug else "./upload/debug.png"
         self.driving_videos = [
             "./data/food0.mp4",
             "./data/food1.mp4",
@@ -162,8 +163,11 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
     frames = 0
     predictions = []
     def append(p):
+        p = feather_torch(p, each=10)
+        p = alpha_blending_torch(p)
         p = p.data.cpu().numpy().squeeze(0)
         p = np.transpose(p, [1, 2, 0])   # transpose to (H, W, C)
+        # p = alpha_blending(p)
         p = np.clip(p, a_min=-1, a_max=1)
         if video_writer is not None:
             video_writer.append_data(img_as_ubyte(p)) # convert to uint8
@@ -171,9 +175,6 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
             predictions.append(img_as_ubyte(p)) # convert to uint8
         nonlocal frames
         frames += 1
-
-    def feather(t):
-        return feather_torch(t, each=10)
 
     def interpolate(x, **kwargs):
         return F.interpolate(x, **kwargs, mode='bilinear', align_corners=False)
@@ -220,7 +221,7 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
             # Upscale center frame using video SR model with multiple input frames for temporal coherence
             if callable(upscaler):
 
-                buffer.append(feather(p))
+                buffer.append(p)
 
                 print("Prediction shape: ", p.shape)
 
@@ -236,9 +237,9 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
 
                     if frames < mod:
                         for f in buffer[:mod]:
-                            append(feather(interpolate(f, size=upscaled.shape)))
+                            append(interpolate(f, size=upscaled.shape))
 
-                    append(feather(upscaled))
+                    append(upscaled)
                     buffer.pop(0)
                     assert len(buffer) == upscaler_frames-1, f"Buffer length exceeded limit: {len(buffer)} / {upscaler_frames}"
 
@@ -246,11 +247,11 @@ def make_animation(source_image, driving_video, generator, kp_detector, relative
 
             else:
 
-                append(feather(p))
+                append(p)
 
     if len(buffer) > 0:
         for f in buffer[-mod:]:
-            append(feather(interpolate(f, size=upscaled.shape)))
+            append(interpolate(f, size=upscaled.shape))
 
         print(f"Finished: {frames} / {driving_length}")
 

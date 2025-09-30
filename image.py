@@ -100,6 +100,31 @@ def feather(img, top=0, left=0, right=0, bottom=0, each=None):
 
     return img
 
+def alpha_blending_torch(rgba, background=(0, 0, 0)):
+    """
+    Alpha blend a batch of RGBA PyTorch tensors with a background color.
+    
+    Parameters:
+    - rgba: torch tensor of shape (N, 4, H, W), float in [0..1]
+    - background: tuple of 3 ints (0-255), RGB background color
+    
+    Returns:
+    - rgb: torch tensor of shape (N, 3, H, W), float in [0..1]
+    """
+    if rgba.shape[1] != 4:
+        raise ValueError("Input tensor does not have 4 channels (RGBA)")
+
+    # N, C, H, W = rgba.shape
+    background = torch.tensor(background, dtype=rgba.dtype, device=rgba.device) / 255.0
+    background = background.view(1, 3, 1, 1)  # Reshape for broadcasting
+
+    rgb = rgba[:, :3, :, :]
+    alpha = rgba[:, 3:4, :, :]  # Keep channel dim for broadcasting
+
+    output = rgb * alpha + background * (1 - alpha)
+
+    return output
+
 def feather_torch(frame_tensor, top=0, left=0, right=0, bottom=0, each=None):
     if each:
         top, left, right, bottom = (each for _ in range(4))
